@@ -42,12 +42,8 @@ def main():
     activ_done = config["activations_dir"] != "NONE"
     rep_done = config["representation_dir"] != "NONE"
     cluster_done = config["cluster_dir"] != "NONE"
-    rep_done = (
-        rep_done or cluster_done
-    )  # if we already have clusters, don't need to do reduction step
-    activ_done = (
-        activ_done or rep_done
-    )  # don't need to get activations if we already have reduced ones
+    rep_done = rep_done or cluster_done  # if we already have clusters, no need to do reduction step
+    activ_done = activ_done or rep_done  # don't to get activations if we already have reduced ones
     if config["classification_config"]["eval_only"]:
         assert activ_done
         if config["cluster_dir"] != "NONE":
@@ -87,8 +83,7 @@ def main():
         exit()
 
     if config["mode"] == "george":
-            model.load_state_dict(torch.load(os.path.join(erm_dir, "best_model.pt"))["state_dict"])
-            )
+        model.load_state_dict(torch.load(os.path.join(erm_dir, "best_model.pt"))["state_dict"])
 
         set_seed(config["seed"], use_cuda)
         # Dimensionality-reduce the model activations
@@ -115,9 +110,7 @@ def main():
 
         set_seed(config["seed"], use_cuda)  # reset random state
         dataloaders = harness.get_dataloaders(
-            config,
-            mode="george",
-            subclass_labels=os.path.join(cluster_dir, "clusters.pt"),
+            config, mode="george", subclass_labels=os.path.join(cluster_dir, "clusters.pt")
         )
         model = harness.get_nn_model(config, num_classes=num_classes, mode="george")
 
