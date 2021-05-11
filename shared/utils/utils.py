@@ -66,9 +66,7 @@ def class_id_to_label(class_id: Int, s_count: int, label: Literal["s", "y"]) -> 
         return class_id // s_count
 
 
-def wandb_log(
-    args: bool, row: dict[str, Any], step: int, commit: bool | None = None
-) -> None:
+def wandb_log(args: bool, row: dict[str, Any], step: int, commit: bool | None = None) -> None:
     """Wrapper around wandb's log function"""
     if not args:
         return
