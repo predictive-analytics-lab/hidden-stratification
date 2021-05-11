@@ -26,11 +26,11 @@ class GEORGECluster:
             If None, logging information is not saved. Default is None.
     """
 
-    def __init__(self, cluster_config, save_dir=None, log_format='full'):
+    def __init__(self, cluster_config, save_dir=None, log_format="full"):
         self.config = cluster_config
         self.save_dir = save_dir
         if self.save_dir:
-            self.logger = init_logger('harness.cluster', self.save_dir, log_format=log_format)
+            self.logger = init_logger("harness.cluster", self.save_dir, log_format=log_format)
         else:
             self.logger = logging.getLogger()
 
@@ -47,13 +47,13 @@ class GEORGECluster:
                 Can be per-cluster metrics or aggregate metrics.
         """
         metrics = {}
-        for metric_type in self.config['metric_types']:
-            if metric_type == 'mean_loss':
-                metric = get_cluster_mean_loss(inputs['losses'], assignments)
-            elif metric_type == 'composition':
-                metric = get_cluster_composition(inputs['true_subclass'], assignments)
+        for metric_type in self.config["metric_types"]:
+            if metric_type == "mean_loss":
+                metric = get_cluster_mean_loss(inputs["losses"], assignments)
+            elif metric_type == "composition":
+                metric = get_cluster_composition(inputs["true_subclass"], assignments)
             else:
-                raise KeyError(f'Unrecognized metric_type {metric_type}')
+                raise KeyError(f"Unrecognized metric_type {metric_type}")
             metrics[metric_type] = metric
         return metrics
 
@@ -89,32 +89,32 @@ class GEORGECluster:
                 indicates the group.
         """
         orig_cluster_model = cluster_model
-        extra_info = hasattr(cluster_model, 'requires_extra_info')
+        extra_info = hasattr(cluster_model, "requires_extra_info")
 
-        inputs_tr = inputs['train']
-        inputs_val = inputs['val']
+        inputs_tr = inputs["train"]
+        inputs_val = inputs["val"]
 
         group_to_models = []
         for group, group_data in inputs_tr[0].items():
-            if group in self.config['superclasses_to_ignore']:
+            if group in self.config["superclasses_to_ignore"]:
                 # Keep this superclass in a single "cluster"
-                self.logger.basic_info(f'Not clustering superclass {group}...')
+                self.logger.basic_info(f"Not clustering superclass {group}...")
                 group_to_models.append(DummyClusterer())
                 continue
 
             cluster_model = deepcopy(orig_cluster_model)
-            activations = group_data['activations']
+            activations = group_data["activations"]
 
             if extra_info:
                 val_group_data = inputs_val[0][group]
-                losses = group_data['losses']
-                val_activations = val_group_data['activations']
-                kwargs = {'val_activ': val_activations, 'losses': losses}
+                losses = group_data["losses"]
+                val_activations = val_group_data["activations"]
+                kwargs = {"val_activ": val_activations, "losses": losses}
             else:
                 kwargs = {}
 
             # cluster
-            self.logger.basic_info(f'Clustering superclass {group}...')
+            self.logger.basic_info(f"Clustering superclass {group}...")
             cluster_model = cluster_model.fit(activations, **kwargs)
             group_to_models.append(cluster_model)
 
@@ -141,12 +141,12 @@ class GEORGECluster:
         group_to_outputs = {}
         cluster_floor = 0
         for group, group_data in group_to_data.items():
-            self.logger.info(f'Evaluating group {group}...')
+            self.logger.info(f"Evaluating group {group}...")
 
             group_outputs = group_data.copy()
             cluster_model = group_to_models[group]
-            assignments = np.array(cluster_model.predict(group_data['activations']))
-            group_outputs['assignments'] = cluster_floor + assignments
+            assignments = np.array(cluster_model.predict(group_data["activations"]))
+            group_outputs["assignments"] = cluster_floor + assignments
 
             group_to_outputs[group] = group_outputs
             group_to_metrics[group] = self.compute_metrics(group_data, assignments)

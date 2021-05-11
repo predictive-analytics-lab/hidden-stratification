@@ -2,14 +2,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import ethicml as em
 import pandas as pd
 import wandb
 
-from shared.configs import BaseConfig
+from .utils import wandb_log
 
-from .utils import as_pretty_dict, flatten_dict, wandb_log
+if TYPE_CHECKING:
+    from shared.configs import BaseConfig
+
 
 __all__ = ["compute_metrics", "make_tuple_from_data", "print_metrics", "write_results_to_csv"]
 

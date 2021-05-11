@@ -1,11 +1,13 @@
 """Functions related to saving and loading results."""
+from __future__ import annotations
 import logging
 from pathlib import Path
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 
-from shared.configs import BaseConfig
+if TYPE_CHECKING:
+    from shared.configs import BaseConfig
 
 __all__ = ["ClusterResults", "save_results", "load_results"]
 

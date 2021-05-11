@@ -1,21 +1,26 @@
 from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import logging
 import os
 import time
-from typing import Any
-
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-from torch.utils.data.dataset import Dataset
-from torch.utils.data.sampler import WeightedRandomSampler
+from typing import Any, Sequence, cast
 from typing_extensions import Literal
 
-from shared.data import adult, load_dataset
-from shared.data.data_loading import DatasetTriplet
+import numpy as np
+from omegaconf import MISSING
+import torch
+from torch.tensor import Tensor
+from torch.utils.data import DataLoader
+from torch.utils.data.dataset import ConcatDataset, Dataset
+from torch.utils.data.sampler import WeightedRandomSampler
+
+from shared.classify import fit_classifier
+from shared.configs import BaseConfig
+from shared.configs.arguments import BaseConfig
+from shared.data.data_loading import DatasetTriplet, load_dataset
 from stratification.classification.datasets import *
 from stratification.classification.george_classification import GEORGEClassification
 from stratification.classification.models import *
@@ -37,9 +42,32 @@ ModeType = Literal["george", "random_gdro", "superclass_gdro", "true_subclass_gd
 
 
 class DatasetConverter(Dataset):
-    def __init__(self, dataset: DatasetTriplet) -> None:
+    def __init__(self, dataset: Dataset, labels: Tensor | None = None) -> None:
         super().__init__()
         self.dataset = dataset
+        self.labels = labels
+
+    def __getitem__(self, index) -> tuple[Tensor, dict[str, int]]:
+        if self.labels is not None:
+            x, s, _ = self.dataset[index]
+            y = cast(int, self.labels[index])
+        else:
+            x, s, y = self.dataset[index]
+        return x, {"superclass": y, "subclass": s}
+
+    def __len__(self) -> int:
+        return len(self.dataset)  # type: ignore
+
+
+class GEORGEDatasetInterfacer(Dataset):
+    def __init__(self, dataset: Dataset, num_classes: int, num_subclasses: int) -> None:
+        super().__init__()
+        self.dataset = dataset
+        self.num_classes = num_classes
+        self.num_subclasses = num_subclasses
+
+    def __getitem__(self, index):
+        return self.dataset[index]
 
 
 class GEORGEHarness:
@@ -338,10 +366,10 @@ class GEORGEHarness:
         )
 
     def get_dataloaders(
-        self, config: dict[str, Any], mode: ModeType = "erm", transforms=None, subclass_labels=None
+        self, config: dict[str, Any], data_config: BaseConfig, use_cuda, mode="erm"
     ):
         train_config = config["classification_config"]
-        data_config = config["data"]
+        device = torch.cuda.current_device() if use_cuda else torch.device("cpu")
 
         if mode == "erm":
             mode_config = train_config["erm_config"]
@@ -350,9 +378,11 @@ class GEORGEHarness:
         train_config = merge_dicts(train_config, mode_config)
 
         #  Load the datasets and wrap with dataloaders
-        datasets = load_dataset(data_config)
+        datasets = load_dataset(
+            data_config,
+        )
 
-        batch_size = config["batch_size"]
+        batch_size = train_config["batch_size"]
         shared_dl_kwargs = {
             "batch_size": batch_size,
             "pin_memory": True,
@@ -361,23 +391,53 @@ class GEORGEHarness:
         }
 
         dataloaders = {}
+        breakpoint()
 
-        dataloaders["train"] = DataLoader(
-            dataset=datasets.train,
+        num_classes = max(datasets.y_dim, 2)
+        num_subclasses = max(datasets.s_dim, 2)
+        train_loader = DataLoader(
+            dataset=datasets.train, shuffle=True, pin_memory=True, batch_size=batch_size
+        )
+        input_shape = datasets.train[0][0].shape
+        clf = fit_classifier(
+            data_config=data_config,
+            input_shape=input_shape,
+            train_data=train_loader,
+            lr=1.0e-3,
+            device=device,
+            target_dim=datasets.y_dim,
+            epochs=0,
+            # epochs=train_config["num_epochs"],
+        )
+        _, y_ctx, _ = clf.predict_dataset(
+            data=datasets.context, device=device, batch_size=batch_size
+        )
+        augmented_train = GEORGEDatasetInterfacer(
+            ConcatDataset(
+                [
+                    DatasetConverter(datasets.train),
+                    DatasetConverter(datasets.context, labels=y_ctx),
+                ]
+            ),
+            num_classes=num_classes,
+            num_subclasses=num_subclasses,
+        )
+        augmented_train.num_subclasses = num_subclasses
+        train_loader = DataLoader(
+            dataset=augmented_train,
+            batch_size=batch_size,
             shuffle=True,
             pin_memory=True,
         )
-
-        dataloaders["context"] = DataLoader(
-            datasets.context,
-            **shared_dl_kwargs,
-        )
+        dataloaders["train"] = train_loader
+        dataloaders["train_clean"] = dataloaders["train"]
+        dataloaders["val"] = dataloaders["train"]
         dataloaders["test"] = DataLoader(
-            datasets.test,
+            DatasetConverter(datasets.test),
             **shared_dl_kwargs,
         )
 
-        return dataloaders
+        return dataloaders, num_classes
 
     def _get_uniform_group_sampler(self, dataset):
         group_counts, group_labels = (

@@ -4,7 +4,6 @@ from typing import Dict, NamedTuple, Optional, Tuple, Union
 
 import ethicml as em
 import ethicml.vision as emvi
-from hydra.utils import to_absolute_path
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -12,11 +11,9 @@ from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataset import ConcatDataset
 from torchvision import transforms as TF
 from torchvision.datasets import MNIST
-from typing_extensions import Literal
 
+from hydra.utils import to_absolute_path
 from shared.configs import (
-    AdultConfig,
-    AdultDatasetSplit,
     BaseConfig,
     CelebaConfig,
     CmnistConfig,
@@ -24,7 +21,6 @@ from shared.configs import (
     QuantizationLevel,
 )
 
-from .adult import load_adult_data
 from .dataset_wrappers import TensorDataTupleDataset
 from .isic import IsicDataset
 from .misc import shrink_dataset
@@ -267,16 +263,6 @@ def load_dataset(cfg: BaseConfig) -> DatasetTriplet:
         context_data = Subset(all_data, context_inds.tolist())
         train_data = Subset(all_data, train_inds.tolist())
         test_data = Subset(all_data, test_inds)
-
-    elif isinstance(args, AdultConfig):
-        context_data, train_data, test_data = load_adult_data(cfg)
-        y_dim = 1
-        if args.adult_split is AdultDatasetSplit.Education:
-            s_dim = 3
-        elif args.adult_split is AdultDatasetSplit.Sex:
-            s_dim = 1
-        else:
-            raise ValueError(f"This split is not yet fully supported: {args.adult_split}")
     else:
         raise ValueError(f"Invalid choice of dataset: {args}")
 
