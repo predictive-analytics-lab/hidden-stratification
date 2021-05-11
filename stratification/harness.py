@@ -1,3 +1,4 @@
+from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 import json
@@ -11,6 +12,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import WeightedRandomSampler
+from typing_extensions import Literal
 
 from shared.data import adult, load_dataset
 from shared.data.data_loading import DatasetTriplet
@@ -30,6 +32,8 @@ from stratification.utils.utils import (
     merge_dicts,
 )
 from stratification.utils.visualization import visualize_clusters_by_group
+
+ModeType = Literal["george", "random_gdro", "superclass_gdro", "true_subclass_gdro", "erm"]
 
 
 class DatasetConverter(Dataset):
@@ -334,15 +338,15 @@ class GEORGEHarness:
         )
 
     def get_dataloaders(
-        self, config: dict[str, Any], mode="erm", transforms=None, subclass_labels=None
+        self, config: dict[str, Any], mode: ModeType = "erm", transforms=None, subclass_labels=None
     ):
         train_config = config["classification_config"]
         data_config = config["data"]
 
         if mode == "erm":
-            mode_config = train_config[f"erm_config"]
+            mode_config = train_config["erm_config"]
         else:
-            mode_config = train_config[f"gdro_config"]
+            mode_config = train_config["gdro_config"]
         train_config = merge_dicts(train_config, mode_config)
 
         #  Load the datasets and wrap with dataloaders
