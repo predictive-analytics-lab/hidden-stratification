@@ -17,11 +17,8 @@ from torch.utils.data import DataLoader
 from typing_extensions import Literal, Protocol
 import wandb
 
-from shared.configs import Config, DatasetConfig, EncoderConfig, MiscConfig
-
 __all__ = [
     "AverageMeter",
-    "ExperimentBase",
     "ModelFn",
     "RunningAverageMeter",
     "as_pretty_dict",
@@ -42,25 +39,6 @@ __all__ = [
 T = TypeVar("T")
 
 Int = TypeVar("Int", Tensor, int)
-
-
-class ExperimentBase:
-    """Experiment singleton base class."""
-
-    def __init__(
-        self,
-        cfg: Config,
-        data_cfg: DatasetConfig,
-        misc_cfg: MiscConfig,
-    ) -> None:
-        self.cfg = cfg
-        self.data_cfg = data_cfg
-        self.misc_cfg = misc_cfg
-
-    def to_device(self, *tensors: Tensor) -> Tensor | tuple[Tensor, ...]:
-        """Place tensors on the correct device."""
-        moved = [tensor.to(self.misc_cfg.device, non_blocking=True) for tensor in tensors]
-        return moved[0] if len(moved) == 1 else tuple(moved)
 
 
 class ModelFn(Protocol):
@@ -89,13 +67,10 @@ def class_id_to_label(class_id: Int, s_count: int, label: Literal["s", "y"]) -> 
 
 
 def wandb_log(
-    args: bool | MiscConfig, row: dict[str, Any], step: int, commit: bool | None = None
+    args: bool, row: dict[str, Any], step: int, commit: bool | None = None
 ) -> None:
     """Wrapper around wandb's log function"""
-    if isinstance(args, bool):
-        if not args:  # this has to be nested in order to make sure `args` is not bool in `elif`
-            return
-    elif not args.use_wandb:
+    if not args:
         return
     wandb.log(row, commit=commit, step=step)
 
