@@ -126,6 +126,8 @@ class BaseConfig:
 
     data: DatasetConfig = MISSING
     bias: BiasConfig = MISSING
+    lr: float = 1e-3
+    epochs: int = 40
 
     @classmethod
     def from_hydra(cls: Type[T], hydra_config: DictConfig) -> T:

@@ -90,10 +90,11 @@ class GEORGEDataset(Dataset):
         """
         return len(next(iter(self.Y_dict.values())))
 
-    def __getitem__(self):
+    def __getitem__(self, idx: int):
         """
         Must be overridden.
         """
+        del idx
         raise NotImplementedError
 
     def add_labels(self, key, values):
