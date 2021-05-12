@@ -53,21 +53,33 @@ class DatasetConverter(Dataset):
             y = cast(int, self.labels[index])
         else:
             x, s, y = self.dataset[index]
-        return x, {"superclass": y, "subclass": s}
+        return x, {"superclass": y, "true_subclass": s}
 
     def __len__(self) -> int:
         return len(self.dataset)  # type: ignore
 
 
 class GEORGEDatasetInterfacer(Dataset):
-    def __init__(self, dataset: Dataset, num_classes: int, num_subclasses: int) -> None:
+    def __init__(
+        self,
+        dataset: Dataset,
+        num_classes: int,
+        num_subclasses: int,
+        class_counts: int,
+        subclass_counts: int,
+    ) -> None:
         super().__init__()
         self.dataset = dataset
         self.num_classes = num_classes
         self.num_subclasses = num_subclasses
+        self.class_counts = class_counts
+        self.subclass_counts = subclass_counts
 
     def __getitem__(self, index):
         return self.dataset[index]
+
+    def __len__(self) -> int:
+        return len(self.dataset)
 
 
 class GEORGEHarness:
@@ -391,7 +403,6 @@ class GEORGEHarness:
         }
 
         dataloaders = {}
-        breakpoint()
 
         num_classes = max(datasets.y_dim, 2)
         num_subclasses = max(datasets.s_dim, 2)
@@ -399,19 +410,27 @@ class GEORGEHarness:
             dataset=datasets.train, shuffle=True, pin_memory=True, batch_size=batch_size
         )
         input_shape = datasets.train[0][0].shape
-        clf = fit_classifier(
-            data_config=data_config,
-            input_shape=input_shape,
-            train_data=train_loader,
-            lr=1.0e-3,
-            device=device,
-            target_dim=datasets.y_dim,
-            epochs=0,
-            # epochs=train_config["num_epochs"],
-        )
-        _, y_ctx, _ = clf.predict_dataset(
-            data=datasets.context, device=device, batch_size=batch_size
-        )
+        breakpoint()
+        # clf = fit_classifier(
+        #     data_config=data_config,
+        #     input_shape=input_shape,
+        #     train_data=train_loader,
+        #     lr=1.0e-3,
+        #     device=device,
+        #     target_dim=datasets.y_dim,
+        #     epochs=train_config["num_epochs"],
+        # )
+        # _, y_ctx, _ = clf.predict_dataset(
+        #     data=datasets.context, device=device, batch_size=batch_size
+        # )
+        # All datasets are assumed to have s and y explicitly defined as attributes
+        y_ctx = torch.randint(0, num_classes, size=(len(datasets.context),))
+
+        _, s_count_tr = torch.unique(datasets.train.s, return_counts=True)
+        _, y_count_tr = torch.unique(datasets.train.y, return_counts=True)
+        _, s_count_ctx = torch.unique(datasets.context.s, return_counts=True)
+        _, y_count_ctx = torch.unique(datasets.context.y, return_counts=True)
+
         augmented_train = GEORGEDatasetInterfacer(
             ConcatDataset(
                 [
@@ -421,6 +440,8 @@ class GEORGEHarness:
             ),
             num_classes=num_classes,
             num_subclasses=num_subclasses,
+            class_counts=y_count_tr + y_count_ctx,
+            subclass_counts=s_count_tr + s_count_ctx,
         )
         augmented_train.num_subclasses = num_subclasses
         train_loader = DataLoader(

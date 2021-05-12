@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optimizers
 import torch.optim.lr_scheduler as schedulers
 
-from stratification.classification.datasets import LABEL_TYPES, GEORGEDataset
+from stratification.classification.datasets import GEORGEDataset, LABEL_TYPES
 from stratification.classification.losses import init_criterion
 from stratification.classification.utils import (
     AverageMeter,
@@ -183,15 +183,16 @@ class GEORGEClassification:
         checkpoint_metric = self.config['checkpoint_metric']
         use_cuda = next(model.parameters()).is_cuda
 
-        train_props = np.bincount(np.array(train_dataloader.dataset.Y_dict['true_subclass'])) / len(
-            train_dataloader.dataset
-        )
-        val_props = np.bincount(np.array(val_dataloader.dataset.Y_dict['true_subclass'])) / len(
-            val_dataloader.dataset
-        )
-        reweight = torch.tensor(train_props / val_props)
-        if use_cuda:
-            reweight = reweight.cuda()
+        # train_props = np.bincount(np.array(train_dataloader.dataset.Y_dict['true_subclass'])) / len(
+        #     train_dataloader.dataset
+        # )
+        # val_props = np.bincount(np.array(val_dataloader.dataset.Y_dict['true_subclass'])) / len(
+        #     val_dataloader.dataset
+        # )
+        # reweight = torch.tensor(train_props / val_props)
+        # if use_cuda:
+        #     reweight = reweight.cuda()
+        reweight = None
 
         self.logger.basic_info('Starting training.')
         for epoch in range(num_epochs):
@@ -276,16 +277,21 @@ class GEORGEClassification:
                 self.config['criterion_config'], robust, dataloader.dataset, self.use_cuda
             )
 
-        train_props = np.bincount(
-            np.array(dataloaders['train'].dataset.Y_dict['true_subclass'])
-        ) / len(dataloaders['train'].dataset)
-        split_props = np.bincount(np.array(dataloader.dataset.Y_dict['true_subclass'])) / len(
-            dataloader.dataset
-        )
-        use_cuda = next(model.parameters()).is_cuda
-        reweight = None if ban_reweight else torch.tensor(train_props / split_props)
-        if use_cuda and reweight is not None:
-            reweight = reweight.cuda()
+        # TODO: double check this
+        # I don't think this makes sense given our setup; I might be wrong in which
+        # case we're intefering with the method
+
+        # train_props = np.bincount(
+        #     np.array(dataloaders['train'].dataset.Y_dict['true_subclass'])
+        # ) / len(dataloaders['train'].dataset)
+        # split_props = np.bincount(np.array(dataloader.dataset.Y_dict['true_subclass'])) / len(
+        #     dataloader.dataset
+        # )
+        # use_cuda = next(model.parameters()).is_cuda
+        # reweight = None if ban_reweight else torch.tensor(train_props / split_props)
+        # if use_cuda and reweight is not None:
+        #     reweight = reweight.cuda()
+        reweight = None
 
         metrics, outputs = self._run_epoch(
             model,
@@ -331,7 +337,7 @@ class GEORGEClassification:
                 for model analysis, including labels, activations, and predictions.
         """
         dataset = dataloader.dataset
-        self._check_dataset(dataset)
+        # self._check_dataset(dataset)
         type_to_num_classes = {
             label_type: dataset.get_num_classes(label_type)
             for label_type in LABEL_TYPES

@@ -149,8 +149,8 @@ class LossComputer:
 
 
 def init_criterion(criterion_config, robust, trainset, use_cuda):
-    num_subclasses = trainset.get_num_classes('subclass')
-    subclass_counts = trainset.get_class_counts('subclass')
+    num_subclasses = trainset.num_subclasses
+    subclass_counts = trainset.subclass_counts
 
     criterion = torch.nn.CrossEntropyLoss(reduction='none')
     if robust:
@@ -166,7 +166,7 @@ def init_criterion(criterion_config, robust, trainset, use_cuda):
         stable=criterion_config['stable_dro'],
         size_adjustments=size_adjustments,
         auroc_version=criterion_config['auroc_gdro'],
-        class_map=trainset.get_class_map('subclass'),
+        class_map=None,
         use_cuda=use_cuda,
     )
     return criterion
