@@ -5,24 +5,36 @@ import numpy as np
 
 
 class LossComputer:
-    def __init__(self, criterion, is_robust, n_groups, group_counts, robust_step_size, stable=True,
-                 size_adjustments=None, auroc_version=False, class_map=None, use_cuda=True):
+    def __init__(
+        self,
+        criterion,
+        is_robust,
+        n_groups,
+        group_counts,
+        robust_step_size,
+        stable=True,
+        size_adjustments=None,
+        auroc_version=False,
+        class_map=None,
+        use_cuda=True,
+    ):
         self.criterion = criterion
         self.is_robust = is_robust
         self.auroc_version = auroc_version
         self.n_groups = n_groups
         if auroc_version:
-            assert (class_map is not None)
+            assert class_map is not None
             self.n_gdro_groups = len(class_map[0]) * len(class_map[1])
             self.class_map = class_map
         else:
             self.n_gdro_groups = n_groups
         self.group_range = torch.arange(self.n_groups).unsqueeze(1).long()
-        if use_cuda: self.group_range = self.group_range.cuda()
+        if use_cuda:
+            self.group_range = self.group_range.cuda()
 
         if self.is_robust:
             self.robust_step_size = robust_step_size
-            logging.info(f'Using robust loss with inner step size {self.robust_step_size}')
+            logging.info(f"Using robust loss with inner step size {self.robust_step_size}")
             self.stable = stable
             self.group_counts = group_counts.to(self.group_range.device)
 
@@ -40,17 +52,19 @@ class LossComputer:
                 self.loss_adjustment = self.adj
 
             logging.info(
-                f'Per-group loss adjustments: {np.round(self.loss_adjustment.tolist(), 2)}')
+                f"Per-group loss adjustments: {np.round(self.loss_adjustment.tolist(), 2)}"
+            )
             # The following quantities are maintained/updated throughout training
             if self.stable:
-                logging.info('Using numerically stabilized DRO algorithm')
+                logging.info("Using numerically stabilized DRO algorithm")
                 self.adv_probs_logits = torch.zeros(self.n_gdro_groups).to(self.group_range.device)
             else:  # for debugging purposes
-                logging.warn('Using original DRO algorithm')
-                self.adv_probs = torch.ones(self.n_gdro_groups).to(
-                    self.group_range.device) / self.n_gdro_groups
+                logging.warn("Using original DRO algorithm")
+                self.adv_probs = (
+                    torch.ones(self.n_gdro_groups).to(self.group_range.device) / self.n_gdro_groups
+                )
         else:
-            logging.info('Using ERM')
+            logging.info("Using ERM")
 
     def loss(self, yhat, y, group_idx=None, is_training=False):
         # compute per-sample and per-group losses
@@ -119,7 +133,8 @@ class LossComputer:
                 group_denom = torch.sum(reweight[inds])
                 group_denom = group_denom
                 group_loss.append(
-                    torch.sum(group_losses) / (group_denom + (group_denom == 0).float()))
+                    torch.sum(group_losses) / (group_denom + (group_denom == 0).float())
+                )
                 group_count.append(group_denom)
             group_loss, group_count = torch.tensor(group_loss), torch.tensor(group_count)
         else:
@@ -134,17 +149,24 @@ class LossComputer:
 
 
 def init_criterion(criterion_config, robust, trainset, use_cuda):
-    num_subclasses = trainset.get_num_classes('subclass')
-    subclass_counts = trainset.get_class_counts('subclass')
+    num_subclasses = trainset.get_num_classes("subclass")
+    subclass_counts = trainset.get_class_counts("subclass")
 
-    criterion = torch.nn.CrossEntropyLoss(reduction='none')
+    criterion = torch.nn.CrossEntropyLoss(reduction="none")
     if robust:
-        size_adjustments = [criterion_config.get('size_adjustment', 0)] * num_subclasses
+        size_adjustments = [criterion_config.get("size_adjustment", 0)] * num_subclasses
     else:
         size_adjustments = None
-    criterion = LossComputer(criterion, robust, num_subclasses, subclass_counts,
-                             criterion_config['robust_lr'], stable=criterion_config['stable_dro'],
-                             size_adjustments=size_adjustments,
-                             auroc_version=criterion_config['auroc_gdro'],
-                             class_map=trainset.get_class_map('subclass'), use_cuda=use_cuda)
+    criterion = LossComputer(
+        criterion,
+        robust,
+        num_subclasses,
+        subclass_counts,
+        criterion_config["robust_lr"],
+        stable=criterion_config["stable_dro"],
+        size_adjustments=size_adjustments,
+        auroc_version=criterion_config["auroc_gdro"],
+        class_map=trainset.get_class_map("subclass"),
+        use_cuda=use_cuda,
+    )
     return criterion

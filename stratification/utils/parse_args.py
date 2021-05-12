@@ -7,23 +7,22 @@ from .schema import schema
 
 
 def get_config(args_list=None):
-    """
-    """
+    """"""
     # load and validate config file
     parser = argparse.ArgumentParser()
-    parser.add_argument('config', action=ActionJsonSchema(schema=schema))
-    parser.add_argument('updates', nargs='*')
+    parser.add_argument("config", action=ActionJsonSchema(schema=schema))
+    parser.add_argument("updates", nargs="*")
     args = parser.parse_args(args_list)
     args = namespace_to_dict(args)
 
     # convert config to json-serializable dict object
-    config = args['config']
-    if '__path__' in config:
-        config = {**config, '__path__': config['__path__'].abs_path}
+    config = args["config"]
+    if "__path__" in config:
+        config = {**config, "__path__": config["__path__"].abs_path}
     config = json.loads(json.dumps(config), cls=ScientificNotationDecoder)
 
     # update config in-place with commandline arguments
-    update_config(config, args['updates'])
+    update_config(config, args["updates"])
     return config
 
 

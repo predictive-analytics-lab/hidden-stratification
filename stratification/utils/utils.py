@@ -27,19 +27,35 @@ def format_timedelta(timedelta):
 
 class NumpyEncoder(json.JSONEncoder):
     """ Special json encoder for numpy types """
+
     def default(self, obj):
-        if isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
-                            np.uint8, np.uint16, np.uint32, np.uint64)):
+        if isinstance(
+            obj,
+            (
+                np.int_,
+                np.intc,
+                np.intp,
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        ):
             return int(obj)
         elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
             return float(obj)
-        elif isinstance(obj, (np.ndarray, )):  #### This is the fix
+        elif isinstance(obj, (np.ndarray,)):  #### This is the fix
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
 
 
 class ScientificNotationDecoder(json.JSONDecoder):
     """Decodes floats incorrectly parsed by ActionJsonSchema (e.g. 1e-5)"""
+
     def __init__(self, *args, **kwargs):
         json.JSONDecoder.__init__(self, object_hook=self.object_hook, *args, **kwargs)
 
@@ -54,7 +70,7 @@ class ScientificNotationDecoder(json.JSONDecoder):
 def keys_to_strings(ob):
     """
     Converts keys in a dictionary object to strings for JSON.
-    
+
     source:
     https://stackoverflow.com/questions/47568356/python-convert-all-keys-to-strings
     """
@@ -74,17 +90,17 @@ def convert_value(value):
 
 
 def get_unique_str():
-    date = datetime.now().strftime('%Y-%m-%d')
-    time = datetime.now().strftime('%H-%M-%S')
+    date = datetime.now().strftime("%Y-%m-%d")
+    time = datetime.now().strftime("%H-%M-%S")
     rand = str(uuid.uuid4())[:8]
-    return f'{date}_{time}_{rand}'
+    return f"{date}_{time}_{rand}"
 
 
 def set_by_dotted_path(d, path, value):
     """
     Change an entry in a nested dict using a dotted path.
     Raises exception if path not in d.
-    
+
     Examples
     --------
     >>> d = {'foo': {'bar': 7}}
@@ -100,8 +116,7 @@ def set_by_dotted_path(d, path, value):
 
     current_option = d
     for idx, p in enumerate(split_path):
-        assert p in current_option, \
-            f'Path {split_path} does not exist in dictionary.'
+        assert p in current_option, f"Path {split_path} does not exist in dictionary."
 
         if idx != split_path_len - 1:
             current_option = current_option[p]
@@ -112,11 +127,12 @@ def set_by_dotted_path(d, path, value):
 def merge_dicts(a, b):
     """
     Returns a dictionary in which b is merged into a.
-    
+
     This is different than the naive approach {**a, **b} because it preserves
-    all existing values in nested dictionaries that appear in both a and b, 
+    all existing values in nested dictionaries that appear in both a and b,
     rather than overwriting a's entire nested dictionary with b's.
     """
+
     def merge_dicts_rec(a, b):
         for key in b:
             if key in a:
@@ -133,17 +149,22 @@ def merge_dicts(a, b):
 
 def get_git_commit_info():
     get_commit_hash = "git log | head -n 1 | awk '{print $2}'"
-    check_unstaged = 'git diff --exit-code'
-    check_staged = 'git diff --cached --exit-code'
-    status = 'git status'
+    check_unstaged = "git diff --exit-code"
+    check_staged = "git diff --cached --exit-code"
+    status = "git status"
     cmds = [get_commit_hash, check_unstaged, check_staged, status]
     do_checks = [True, False, False, True]
     saved_infos = []
     for cmd, do_check in zip(cmds, do_checks):
         try:
-            process_result = subprocess.run(cmd, shell=True, check=do_check,
-                                            universal_newlines=True, stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE)
+            process_result = subprocess.run(
+                cmd,
+                shell=True,
+                check=do_check,
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
             saved_infos.append((process_result.returncode, process_result.stdout.strip()))
             err_msg = None
         except subprocess.CalledProcessError as e:
@@ -152,9 +173,9 @@ def get_git_commit_info():
     if err_msg is not None:
         return err_msg
     commit_hash = saved_infos[0][1]
-    msg = 'Current commit: ' + commit_hash
+    msg = "Current commit: " + commit_hash
     if saved_infos[1][0] or saved_infos[2][0]:
-        msg += '; Uncommitted changes present'
+        msg += "; Uncommitted changes present"
     return msg
 
 
@@ -175,7 +196,7 @@ def init_cuda(deterministic, allow_multigpu=False):
         torch.backends.cudnn.deterministic = deterministic
         torch.backends.cudnn.benchmark = not deterministic
     if torch.cuda.device_count() > 1 and not allow_multigpu:
-        raise RuntimeError('Multi-GPU training unsupported. Run with CUDA_VISIBLE_DEVICES=X')
+        raise RuntimeError("Multi-GPU training unsupported. Run with CUDA_VISIBLE_DEVICES=X")
     return use_cuda
 
 
@@ -214,23 +235,23 @@ def move_to_device(obj, device):
 
 
 def save_config(config, save_path):
-    f = open(save_path, 'w')
+    f = open(save_path, "w")
     json_str = json.dumps(json.loads(jsonpickle.encode(config)), indent=4)
     f.write(json_str)
     f.close()
 
 
 def load_config(load_path):
-    f = open(load_path, 'r')
+    f = open(load_path, "r")
     config = jsonpickle.decode(f.read())
     f.close()
     return config
 
 
-def flatten_dict(d, parent_key='', sep='_'):
-    '''
+def flatten_dict(d, parent_key="", sep="_"):
+    """
     Source: https://stackoverflow.com/questions/6027558/flatten-nested-dictionaries-compressing-keys
-    '''
+    """
     items = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
@@ -252,5 +273,5 @@ def concatenate_iterable(list_of_iterables):
 
 def get_learning_rate(optimizer):
     for param_group in optimizer.param_groups:
-        if 'lr' in param_group:
-            return param_group['lr']
+        if "lr" in param_group:
+            return param_group["lr"]
