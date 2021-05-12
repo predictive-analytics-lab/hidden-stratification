@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import cast
 
 from PIL import Image
 import numpy as np
@@ -87,9 +88,13 @@ class CelebADataset(GEORGEDataset):
         split_df = pd.read_csv(
             os.path.join(self.root, 'celebA', 'list_eval_partition.csv'), delim_whitespace=True
         )
-        split_array = split_df['partition'].values
+        split_df = cast(pd.DataFrame, split_df)
+        # split_array = split_df['partition'].values
+        # split_indices = split_array == split_dict[self.split]
         split_dict = {'train': 0, 'val': 1, 'test': 2}
-        split_indices = split_array == split_dict[self.split]
+        split_indices = split_df["indices"][
+            split_df['partition'] == split_dict[self.split]
+        ].to_numpy()
 
         X = filename_array[split_indices]
         Y_dict = {

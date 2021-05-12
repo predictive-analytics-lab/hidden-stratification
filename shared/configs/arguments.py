@@ -3,11 +3,11 @@ import logging
 import shlex
 from typing import Dict, List, Type, TypeVar
 
+import torch
+
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
 from omegaconf import DictConfig, MISSING
-import torch
-
 from shared.configs.enums import CelebaAttributes, IsicAttrs, QuantizationLevel
 
 __all__ = [
@@ -126,8 +126,6 @@ class BaseConfig:
 
     data: DatasetConfig = MISSING
     bias: BiasConfig = MISSING
-    lr: float = 1e-3
-    epochs: int = 40
 
     @classmethod
     def from_hydra(cls: Type[T], hydra_config: DictConfig) -> T:

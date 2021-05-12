@@ -1,15 +1,26 @@
+from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import logging
 import os
 import time
+from typing import Any, Sequence, cast
+from typing_extensions import Literal
 
 import numpy as np
+from omegaconf import MISSING
 import torch
+from torch.tensor import Tensor
 from torch.utils.data import DataLoader
+from torch.utils.data.dataset import ConcatDataset, Dataset
 from torch.utils.data.sampler import WeightedRandomSampler
 
+from shared.classify import fit_classifier
+from shared.configs import BaseConfig
+from shared.configs.arguments import BaseConfig
+from shared.data.data_loading import DatasetTriplet, load_dataset
 from stratification.classification.datasets import *
 from stratification.classification.george_classification import GEORGEClassification
 from stratification.classification.models import *
@@ -27,6 +38,49 @@ from stratification.utils.utils import (
 )
 from stratification.utils.visualization import visualize_clusters_by_group
 
+ModeType = Literal["george", "random_gdro", "superclass_gdro", "true_subclass_gdro", "erm"]
+
+
+class DatasetConverter(Dataset):
+    def __init__(self, dataset: Dataset, labels: Tensor | None = None) -> None:
+        super().__init__()
+        self.dataset = dataset
+        self.labels = labels
+
+    def __getitem__(self, index) -> tuple[Tensor, dict[str, int]]:
+        if self.labels is not None:
+            x, s, _ = self.dataset[index]
+            y = cast(int, self.labels[index])
+        else:
+            x, s, y = self.dataset[index]
+        return x, {"superclass": y, "true_subclass": s}
+
+    def __len__(self) -> int:
+        return len(self.dataset)  # type: ignore
+
+
+class GEORGEDatasetInterfacer(Dataset):
+    def __init__(
+        self,
+        dataset: Dataset,
+        num_classes: int,
+        num_subclasses: int,
+        class_counts: int,
+        subclass_counts: int,
+    ) -> None:
+        super().__init__()
+        self.dataset = dataset
+        self.num_classes = num_classes
+        self.num_subclasses = num_subclasses
+        self.class_counts = class_counts
+        self.subclass_counts = subclass_counts
+
+    def __getitem__(self, index):
+        return self.dataset[index]
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
 
 class GEORGEHarness:
     """Training harness for the GEORGE algorithm.
@@ -43,24 +97,30 @@ class GEORGEHarness:
             the GPU.
     """
 
-    def __init__(self, config, use_cuda=False, log_format='full'):
+    def __init__(self, config, use_cuda=False, log_format="full"):
         if (
-            config['classification_config']['eval_only']
-            or config['classification_config']['save_act_only']
+            config["classification_config"]["eval_only"]
+            or config["classification_config"]["save_act_only"]
         ):
-            self.exp_dir = config['activations_dir']
+            self.exp_dir = config["activations_dir"]
         else:
-            self.exp_dir = os.path.join(config['exp_dir'], 'run_' + get_unique_str())
+            self.exp_dir = os.path.join(config["exp_dir"], "run_" + get_unique_str())
             os.makedirs(self.exp_dir, exist_ok=True)
         self.log_format = log_format
-        self.logger = init_logger('harness', self.exp_dir, log_format=log_format)
+        self.logger = init_logger("harness", self.exp_dir, log_format=log_format)
         self.use_cuda = use_cuda
 
     def save_full_config(self, config):
-        self._save_config(self.exp_dir, config, msg='Saving full config')
+        self._save_config(self.exp_dir, config, msg="Saving full config")
 
     def run_george(
-        self, config, dataloaders, model, cluster_model, reduction_model, activation_layer=None
+        self,
+        config,
+        dataloaders,
+        model,
+        cluster_model,
+        reduction_model,
+        activation_layer=None,
     ):
         """Runs all three stages of the GEORGE pipeline: ERM, cluster, DRO.
 
@@ -85,31 +145,31 @@ class GEORGEHarness:
         outputs = []
 
         # (1) Train initial representation
-        self.logger.basic_info('Training initial representation step (1/3)...')
+        self.logger.basic_info("Training initial representation step (1/3)...")
         state_dict = deepcopy(model.state_dict())
-        erm_dir = self.classify(config['classification_config'], model, dataloaders, 'erm')
+        erm_dir = self.classify(config["classification_config"], model, dataloaders, "erm")
         outputs.append(erm_dir)
 
-        self.logger.basic_info('Running reduction step (2/3)...')
-        reduction_dir = self.reduce(config, inputs_path=os.path.join(erm_dir, 'outputs.pt'))
+        self.logger.basic_info("Running reduction step (2/3)...")
+        reduction_dir = self.reduce(config, inputs_path=os.path.join(erm_dir, "outputs.pt"))
         outputs.append(reduction_dir)
 
         # (2) cluster
-        self.logger.basic_info('Running cluster step (2/3)...')
-        cluster_dir = self.cluster(config, inputs_path=os.path.join(reduction_dir, 'outputs.pt'))
+        self.logger.basic_info("Running cluster step (2/3)...")
+        cluster_dir = self.cluster(config, inputs_path=os.path.join(reduction_dir, "outputs.pt"))
         outputs.append(cluster_dir)
 
         # (3) DRO
-        self.logger.basic_info(f'Running DRO step (3/3)...')
-        if config['classification_config']['reset_model_state']:
+        self.logger.basic_info(f"Running DRO step (3/3)...")
+        if config["classification_config"]["reset_model_state"]:
             model.load_state_dict(state_dict)
-            self.logger.basic_info('Model state reset')
+            self.logger.basic_info("Model state reset")
         dro_dir = self.classify(
-            config['classification_config'],
+            config["classification_config"],
             model,
             dataloaders,
-            'george',
-            clusters_path=os.path.join(cluster_dir, 'clusters.pt'),
+            "george",
+            clusters_path=os.path.join(cluster_dir, "clusters.pt"),
         )
         outputs.append(dro_dir)
         return outputs
@@ -146,16 +206,16 @@ class GEORGEHarness:
                 checkpoints, best model outputs, and best model metrics.
         """
         # overwrite args in classification_config with mode specific params
-        if mode == 'erm':
-            mode_config = classification_config[f'erm_config']
+        if mode == "erm":
+            mode_config = classification_config[f"erm_config"]
         else:
-            mode_config = classification_config[f'gdro_config']
+            mode_config = classification_config[f"gdro_config"]
         classification_config = merge_dicts(classification_config, mode_config)
 
-        if classification_config['eval_only'] or classification_config['save_act_only']:
+        if classification_config["eval_only"] or classification_config["save_act_only"]:
             save_dir = self.exp_dir
         else:
-            save_dir = os.path.join(self.exp_dir, f'{mode}_{get_unique_str()}')
+            save_dir = os.path.join(self.exp_dir, f"{mode}_{get_unique_str()}")
             self._save_config(save_dir, classification_config)
         robust = self._get_robust_status(mode)
 
@@ -165,54 +225,54 @@ class GEORGEHarness:
             save_dir=save_dir,
             use_cuda=self.use_cuda,
             log_format=self.log_format,
-            has_estimated_subclasses=mode not in ['erm', 'true_subclass_gdro'],
+            has_estimated_subclasses=mode not in ["erm", "true_subclass_gdro"],
         )
         if not (
-            classification_config['eval_only']
-            or classification_config['save_act_only']
-            or classification_config['bit_pretrained']
+            classification_config["eval_only"]
+            or classification_config["save_act_only"]
+            or classification_config["bit_pretrained"]
         ):
-            trainer.train(model, dataloaders['train'], dataloaders['val'], robust=robust)
+            trainer.train(model, dataloaders["train"], dataloaders["val"], robust=robust)
 
         # (2) evaluate
         split_to_outputs = {}
         split_to_metrics = {}
         for split, dataloader in dataloaders.items():
-            if split == 'train':
+            if split == "train":
                 continue
-            key = 'train' if split == 'train_clean' else split
-            if classification_config['eval_only'] and key != 'test':
+            key = "train" if split == "train_clean" else split
+            if classification_config["eval_only"] and key != "test":
                 continue
-            self.logger.basic_info(f'Evaluating on {key} split...')
+            self.logger.basic_info(f"Evaluating on {key} split...")
             metrics, outputs = trainer.evaluate(
                 model,
                 dataloaders,
                 split,
                 robust=robust,
                 save_activations=True,
-                bit_pretrained=classification_config['bit_pretrained'],
-                adv_metrics=classification_config['eval_only'],
-                ban_reweight=classification_config['ban_reweight'],
+                bit_pretrained=classification_config["bit_pretrained"],
+                adv_metrics=classification_config["eval_only"],
+                ban_reweight=classification_config["ban_reweight"],
             )
             split_to_metrics[key] = metrics
             split_to_outputs[key] = outputs
 
         # (3) save everything
-        if not classification_config['eval_only']:
-            self._save_json(os.path.join(save_dir, 'metrics.json'), split_to_metrics)
-            self._save_torch(os.path.join(save_dir, 'outputs.pt'), split_to_outputs)
+        if not classification_config["eval_only"]:
+            self._save_json(os.path.join(save_dir, "metrics.json"), split_to_metrics)
+            self._save_torch(os.path.join(save_dir, "outputs.pt"), split_to_outputs)
         return save_dir
 
     def reduce(self, reduction_config, reduction_model, inputs_path):
-        save_dir = os.path.join(os.path.dirname(inputs_path), f'reduce_{get_unique_str()}')
-        self._save_config(save_dir, reduction_config, msg='Saving reduction step config')
+        save_dir = os.path.join(os.path.dirname(inputs_path), f"reduce_{get_unique_str()}")
+        self._save_config(save_dir, reduction_config, msg="Saving reduction step config")
         inputs = torch.load(inputs_path)
         assert (
-            len(set(inputs.keys()) & {'train', 'val', 'test'}) == 3
+            len(set(inputs.keys()) & {"train", "val", "test"}) == 3
         ), 'Must have ["train", "val", "test"] splits.'
         for split, split_inputs in inputs.items():
             assert (
-                len(set(split_inputs.keys()) & {'superclass', 'activations'}) == 2
+                len(set(split_inputs.keys()) & {"superclass", "activations"}) == 2
             ), f'{split} split of loaded inputs must have ["superclass", "activations"] keys'
 
         # apply dimensionality reduction (if specified) to the data
@@ -222,10 +282,10 @@ class GEORGEHarness:
         split_to_outputs = {}
         for split, split_inputs in inputs.items():
             outputs = reducer.evaluate(group_to_models, inputs[split], train_means)
-            split_to_outputs[split] = (outputs, inputs[split]['superclass'])
+            split_to_outputs[split] = (outputs, inputs[split]["superclass"])
 
         # save reduced data
-        self._save_torch(os.path.join(save_dir, 'outputs.pt'), split_to_outputs)
+        self._save_torch(os.path.join(save_dir, "outputs.pt"), split_to_outputs)
         return save_dir
 
     def cluster(self, cluster_config, cluster_model, inputs_path):
@@ -267,17 +327,17 @@ class GEORGEHarness:
             save_dir(str). subdirectory within `exp_dir` that contains the cluster
                 assignments, other cluster output, and cluster metrics.
         """
-        save_dir = os.path.join(os.path.dirname(inputs_path), f'cluster_{get_unique_str()}')
-        self._save_config(save_dir, cluster_config, msg='Saving cluster step config')
+        save_dir = os.path.join(os.path.dirname(inputs_path), f"cluster_{get_unique_str()}")
+        self._save_config(save_dir, cluster_config, msg="Saving cluster step config")
         inputs = torch.load(inputs_path)
         assert (
-            len(set(inputs.keys()) & {'train', 'val', 'test'}) == 3
+            len(set(inputs.keys()) & {"train", "val", "test"}) == 3
         ), 'Must have ["train", "val", "test"] splits.'
         for split, split_inputs in inputs.items():
             for group, group_data in split_inputs[0].items():
-                assert len(set(group_data.keys()) & {'activations', 'losses'}) == 2, (
+                assert len(set(group_data.keys()) & {"activations", "losses"}) == 2, (
                     f'{split} split of loaded inputs must have ["activations", "losses"] keys'
-                    ' for each superclass'
+                    " for each superclass"
                 )
 
         # (1) train
@@ -293,11 +353,11 @@ class GEORGEHarness:
             split_to_outputs[split] = outputs
 
         # (3) save everything
-        self._save_json(os.path.join(save_dir, 'metrics.json'), split_to_metrics)
-        self._save_torch(os.path.join(save_dir, 'outputs.pt'), split_to_outputs)
+        self._save_json(os.path.join(save_dir, "metrics.json"), split_to_metrics)
+        self._save_torch(os.path.join(save_dir, "outputs.pt"), split_to_outputs)
         # save assignments only
-        split_to_assignments = {k: v['assignments'] for k, v in split_to_outputs.items()}
-        self._save_torch(os.path.join(save_dir, 'clusters.pt'), split_to_assignments)
+        split_to_assignments = {k: v["assignments"] for k, v in split_to_outputs.items()}
+        self._save_torch(os.path.join(save_dir, "clusters.pt"), split_to_assignments)
         group_to_k = {
             group: get_k_from_model(cluster_model)
             for group, cluster_model in enumerate(group_to_models)
@@ -307,92 +367,103 @@ class GEORGEHarness:
 
     def _get_robust_status(self, mode):
         """Identifies if the given `mode` calls for DRO"""
-        if mode in {'george', 'random_gdro', 'superclass_gdro', 'true_subclass_gdro'}:
+        if mode in {"george", "random_gdro", "superclass_gdro", "true_subclass_gdro"}:
             return True
-        elif mode == 'erm':
+        elif mode == "erm":
             return False
         raise ValueError(
-            'mode {mode} not valid. Use one of the following:\n'
+            "mode {mode} not valid. Use one of the following:\n"
             + '["george", "random_gdro", "superclass_gdro", "true_subclass_gdro", '
             + '"erm"]'
         )
 
-    def get_dataloaders(self, config, mode='erm', transforms=None, subclass_labels=None):
-        dataset_name = config['dataset']
-        seed = config['seed']
-        config = config['classification_config']
-        if mode == 'george':
-            assert '.pt' in subclass_labels  # file path to subclass labels specified
-        elif mode != 'erm':
-            assert subclass_labels is None
-            subclass_labels = mode.rstrip('_gdro')
+    def get_dataloaders(
+        self, config: dict[str, Any], data_config: BaseConfig, use_cuda, mode="erm"
+    ):
+        train_config = config["classification_config"]
+        device = torch.cuda.current_device() if use_cuda else torch.device("cpu")
 
-        if subclass_labels is None:
-            # subclass labels default to superclass labels if none are given
-            subclass_labels = 'superclass'
-
-        if '.pt' in subclass_labels:  # file path specified
-            subclass_labels = torch.load(subclass_labels)
-        else:  # keyword specified
-            kw = subclass_labels
-            subclass_labels = defaultdict(lambda: kw)
-
-        if mode == 'erm':
-            mode_config = config[f'erm_config']
+        if mode == "erm":
+            mode_config = train_config["erm_config"]
         else:
-            mode_config = config[f'gdro_config']
-        config = merge_dicts(config, mode_config)
+            mode_config = train_config["gdro_config"]
+        train_config = merge_dicts(train_config, mode_config)
 
-        dataset_name = dataset_name.lower()
-        d = {
-            'celeba': CelebADataset,
-            'isic': ISICDataset,
-            'mnist': MNISTDataset,
-            'waterbirds': WaterbirdsDataset,
+        #  Load the datasets and wrap with dataloaders
+        datasets = load_dataset(
+            data_config,
+        )
+
+        batch_size = train_config["batch_size"]
+        shared_dl_kwargs = {
+            "batch_size": batch_size,
+            "pin_memory": True,
+            "num_workers": train_config["workers"],
+            "shuffle": True,
         }
-        dataset_class = d[dataset_name]
-        batch_size = config['batch_size']
 
         dataloaders = {}
-        for split in DATA_SPLITS:
-            key = 'train' if 'train' in split else split
-            split_subclass_labels = subclass_labels[key]
-            shared_dl_args = {'batch_size': batch_size, 'num_workers': config['workers']}
-            if split == 'train':
-                dataset = dataset_class(
-                    root='./data',
-                    split=split,
-                    download=True,
-                    augment=True,
-                    **config['dataset_config'],
-                )
-                dataset.add_subclass_labels(split_subclass_labels, seed=seed)
-                if config.get('uniform_group_sampling', False):
-                    sampler, group_weights = self._get_uniform_group_sampler(dataset)
-                    self.logger.info(
-                        f'Resampling training data with subclass weights:\n{group_weights}'
-                    )
-                    dataloaders[split] = DataLoader(
-                        dataset, **shared_dl_args, shuffle=False, sampler=sampler
-                    )
-                else:
-                    dataloaders[split] = DataLoader(dataset, **shared_dl_args, shuffle=True)
-            else:
-                # Evaluation dataloaders (including for the training set) are "clean" - no data augmentation or shuffling
-                dataset = dataset_class(root='./data', split=key, **config['dataset_config'])
-                dataset.add_subclass_labels(split_subclass_labels, seed=seed)
-                dataloaders[split] = DataLoader(dataset, **shared_dl_args, shuffle=False)
 
-            self.logger.info(f'{split} split:')
-            # log class counts for each label type
-            for label_type, labels in dataset.Y_dict.items():
-                self.logger.info(f'{label_type.capitalize()} counts: {np.bincount(labels)}')
+        num_classes = max(datasets.y_dim, 2)
+        num_subclasses = max(datasets.s_dim, 2)
+        train_loader = DataLoader(
+            dataset=datasets.train, shuffle=True, pin_memory=True, batch_size=batch_size
+        )
+        input_shape = datasets.train[0][0].shape
+        breakpoint()
+        # clf = fit_classifier(
+        #     data_config=data_config,
+        #     input_shape=input_shape,
+        #     train_data=train_loader,
+        #     lr=1.0e-3,
+        #     device=device,
+        #     target_dim=datasets.y_dim,
+        #     epochs=train_config["num_epochs"],
+        # )
+        # _, y_ctx, _ = clf.predict_dataset(
+        #     data=datasets.context, device=device, batch_size=batch_size
+        # )
+        # All datasets are assumed to have s and y explicitly defined as attributes
+        y_ctx = torch.randint(0, num_classes, size=(len(datasets.context),))
 
-        return dataloaders
+        _, s_count_tr = torch.unique(datasets.train.s, return_counts=True)
+        _, y_count_tr = torch.unique(datasets.train.y, return_counts=True)
+        _, s_count_ctx = torch.unique(datasets.context.s, return_counts=True)
+        _, y_count_ctx = torch.unique(datasets.context.y, return_counts=True)
+
+        augmented_train = GEORGEDatasetInterfacer(
+            ConcatDataset(
+                [
+                    DatasetConverter(datasets.train),
+                    DatasetConverter(datasets.context, labels=y_ctx),
+                ]
+            ),
+            num_classes=num_classes,
+            num_subclasses=num_subclasses,
+            class_counts=y_count_tr + y_count_ctx,
+            subclass_counts=s_count_tr + s_count_ctx,
+        )
+        augmented_train.num_subclasses = num_subclasses
+        train_loader = DataLoader(
+            dataset=augmented_train,
+            batch_size=batch_size,
+            shuffle=True,
+            pin_memory=True,
+        )
+        dataloaders["train"] = train_loader
+        dataloaders["train_clean"] = dataloaders["train"]
+        dataloaders["val"] = dataloaders["train"]
+        dataloaders["test"] = DataLoader(
+            DatasetConverter(datasets.test),
+            **shared_dl_kwargs,
+        )
+
+        return dataloaders, num_classes
 
     def _get_uniform_group_sampler(self, dataset):
-        group_counts, group_labels = dataset.get_class_counts('subclass'), dataset.get_labels(
-            'subclass'
+        group_counts, group_labels = (
+            dataset.get_class_counts("subclass"),
+            dataset.get_labels("subclass"),
         )
         group_weights = np.array([len(dataset) / c if c != 0 else 0 for c in group_counts])
         group_weights /= np.sum(group_weights)
@@ -400,61 +471,65 @@ class GEORGEHarness:
         sampler = WeightedRandomSampler(weights, num_samples=len(dataset), replacement=True)
         return sampler, group_weights
 
-    def get_nn_model(self, config, num_classes, mode='erm'):
-        cl_config = config['classification_config']
-        if mode == 'erm':
-            mode_config = cl_config[f'erm_config']
+    def get_nn_model(self, config, num_classes, mode="erm"):
+        cl_config = config["classification_config"]
+        if mode == "erm":
+            mode_config = cl_config[f"erm_config"]
         else:
-            mode_config = cl_config[f'gdro_config']
+            mode_config = cl_config[f"gdro_config"]
         cl_config = merge_dicts(cl_config, mode_config)
-        if cl_config['bit_pretrained']:
+        if cl_config["bit_pretrained"]:
             model_cls = BiTResNet
         else:
-            models = {'lenet4': LeNet4, 'resnet50': PyTorchResNet, 'shallow_cnn': ShallowCNN}
+            models = {
+                "lenet4": LeNet4,
+                "resnet50": PyTorchResNet,
+                "shallow_cnn": ShallowCNN,
+            }
             try:
-                model_cls = models[cl_config['model']]
+                model_cls = models[cl_config["model"]]
             except KeyError:
-                raise ValueError('Unsupported model architecture')
+                raise ValueError("Unsupported model architecture")
         model = model_cls(num_classes=num_classes)
         if self.use_cuda:
             model = torch.nn.DataParallel(model).cuda()
-        self.logger.info('Model:')
+        self.logger.info("Model:")
         self.logger.info(str(model))
         return model
 
     def get_reduction_model(self, config, nn_model=None):
-        red_config = config['reduction_config']
+        red_config = config["reduction_config"]
         models = {
-            'none': NoOpReducer,
-            'pca': PCAReducer,
-            'umap': UMAPReducer,
-            'hardness': HardnessAugmentedReducer,
+            "none": NoOpReducer,
+            "pca": PCAReducer,
+            "umap": UMAPReducer,
+            "hardness": HardnessAugmentedReducer,
         }
-        if red_config['model'] != 'hardness':
-            reduction_cls = models[red_config['model']]
+        if red_config["model"] != "hardness":
+            reduction_cls = models[red_config["model"]]
             reduction_model = reduction_cls(
-                random_state=config['seed'], n_components=red_config['components']
+                random_state=config["seed"], n_components=red_config["components"]
             )
         else:
             assert nn_model is not None
             base_reduction_model = UMAPReducer(
-                random_state=config['seed'], n_components=red_config['components']
+                random_state=config["seed"], n_components=red_config["components"]
             )
             reduction_model = HardnessAugmentedReducer(nn_model, base_reduction_model)
         return reduction_model
 
     def get_cluster_model(self, config):
-        cluster_config = config['cluster_config']
+        cluster_config = config["cluster_config"]
 
         kwargs = {
-            'cluster_method': cluster_config['model'],
-            'max_k': cluster_config['k'],
-            'seed': config['seed'],
-            'sil_cuda': cluster_config['sil_cuda'],
-            'search': cluster_config['search_k'],
+            "cluster_method": cluster_config["model"],
+            "max_k": cluster_config["k"],
+            "seed": config["seed"],
+            "sil_cuda": cluster_config["sil_cuda"],
+            "search": cluster_config["search_k"],
         }
-        if cluster_config['overcluster']:
-            cluster_model = OverclusterModel(**kwargs, oc_fac=cluster_config['overcluster_factor'])
+        if cluster_config["overcluster"]:
+            cluster_model = OverclusterModel(**kwargs, oc_fac=cluster_config["overcluster_factor"])
         else:
             cluster_model = AutoKMixtureModel(**kwargs)
         return cluster_model
@@ -462,13 +537,13 @@ class GEORGEHarness:
     def _save_cluster_visualizations(self, save_dir, inputs, group_to_k, split_to_outputs, trainer):
         """Generates and saves cluster visualizations."""
         for split, outputs in split_to_outputs.items():
-            visualization_dir = os.path.join(save_dir, 'visualizations', split)
+            visualization_dir = os.path.join(save_dir, "visualizations", split)
             os.makedirs(visualization_dir, exist_ok=True)
             visualize_clusters_by_group(
-                outputs['activations'],
-                cluster_assignments=outputs['assignments'],
+                outputs["activations"],
+                cluster_assignments=outputs["assignments"],
                 group_assignments=inputs[split][1],
-                true_subclass_labels=outputs['true_subclass'],
+                true_subclass_labels=outputs["true_subclass"],
                 group_to_k=group_to_k,
                 save_dir=visualization_dir,
             )
@@ -476,15 +551,15 @@ class GEORGEHarness:
     def _save_config(self, save_dir, config, msg=None):
         """Helper function to save `config` in `save_dir`."""
         os.makedirs(save_dir, exist_ok=True)
-        self._save_json(os.path.join(save_dir, 'config.json'), config)
+        self._save_json(os.path.join(save_dir, "config.json"), config)
         if msg is not None:
             self.logger.info(msg)
-        self.logger.basic_info(f'Config saved in: {save_dir}')
-        self.logger.info(f'Config:\n{json.dumps(config, indent=4)}')
+        self.logger.basic_info(f"Config saved in: {save_dir}")
+        self.logger.info(f"Config:\n{json.dumps(config, indent=4)}")
 
     def _save_json(self, save_path, data):
         """Saves JSON type objects."""
-        with open(save_path, 'w') as f:
+        with open(save_path, "w") as f:
             json.dump(keys_to_strings(data), f, indent=4, cls=NumpyEncoder)
 
     def _save_torch(self, save_path, data):

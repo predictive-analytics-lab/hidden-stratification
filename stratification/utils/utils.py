@@ -249,9 +249,9 @@ def load_config(load_path):
 
 
 def flatten_dict(d, parent_key='', sep='_'):
-    '''
+    """
     Source: https://stackoverflow.com/questions/6027558/flatten-nested-dictionaries-compressing-keys
-    '''
+    """
     items = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
