@@ -384,7 +384,7 @@ class GEORGEClassification:
         outputs_cat = {}
         for key, value in outputs.items():
             if value:
-                value = torch.cat(value, dim=0).numpy()
+                value = torch.cat(value, dim=0).detach().cpu().numpy()
             outputs_cat[key] = value
         del outputs
 
