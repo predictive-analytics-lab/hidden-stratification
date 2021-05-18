@@ -5,6 +5,7 @@ from typing_extensions import Literal
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.dataset import ConcatDataset
 import wandb
 
 from fdm.models import Classifier
@@ -13,7 +14,11 @@ from shared.data.data_loading import DatasetTriplet
 
 from .base import GEORGEDataset
 from .classifier import fit_classifier
-from .extraction import TrainContextWrapper, extract_labels_from_dataset
+from .extraction import (
+    ExtractableDataset,
+    TrainContextWrapper,
+    extract_labels_from_dataset,
+)
 
 DATA_SPLITS = Literal["train", "train_clean", "val", "test"]
 
@@ -22,12 +27,12 @@ class FdmDatasetWrapper(GEORGEDataset):
     def __init__(
         self,
         cfg: BaseConfig,
-        dataset_triplet: DatasetTriplet,
+        dataset: ExtractableDataset,
         split: DATA_SPLITS,
         device: torch.device,
     ) -> None:
         self.cfg = cfg
-        self.triplet = dataset_triplet
+        self.dataset = dataset
         self.device = device
         super().__init__(name=cfg.data.log_name, root="no need to know", split=split)
 
@@ -35,17 +40,9 @@ class FdmDatasetWrapper(GEORGEDataset):
         return True  # this always exists
 
     def _load_samples(self) -> Tuple[Dataset[Tuple[Tensor, Tensor, Tensor]], Dict[str, Tensor]]:
-        if self.split in ("train", "train_clean", "val"):
-            # 1. step: train classifier on triplet.train
-            # 2. step: predict labels on triplet.context
-            # 3. step: combine datasets
-            dataset = train_and_predict(self.cfg, self.triplet, device=self.device)
-        else:
-            dataset = self.triplet.test
-        # 4. step: extract labels
-        s, y = extract_labels_from_dataset(dataset)
+        s, y = extract_labels_from_dataset(self.dataset)
         y_dict = {"superclass": y.flatten(), "true_subclass": s.flatten()}
-        return dataset, y_dict
+        return self.dataset, y_dict
 
     def __getitem__(self, idx: int):
         x, _, _ = self.X[idx]
