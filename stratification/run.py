@@ -22,6 +22,7 @@ def main() -> None:
             config_name="biased_data",
             overrides=[f"data={config['data_config']}", f"bias={config['bias_config']}"],
         )
+        hydra_config["data"]["data_split_seed"] = config.get("data_split_seed", config["seed"])
         print(hydra_config)
         biased_data_config = BaseConfig.from_hydra(hydra_config)
 
