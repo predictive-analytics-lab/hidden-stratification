@@ -7,12 +7,16 @@ from typing import Any, Dict, Optional
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.data.dataset import ConcatDataset
 from torch.utils.data.sampler import WeightedRandomSampler
 import wandb
 
+from fdm.models import Classifier
 from shared.configs import BaseConfig
 from shared.data.data_loading import load_dataset
 from stratification.classification.datasets import *
+from stratification.classification.datasets.classifier import fit_classifier
+from stratification.classification.datasets.extraction import TrainContextWrapper
 from stratification.classification.datasets.fdm_data_wrapper import FdmDatasetWrapper
 from stratification.classification.george_classification import GEORGEClassification
 from stratification.classification.models import *
@@ -366,27 +370,75 @@ class GEORGEHarness:
             mode_config = config[f'gdro_config']
         config = merge_dicts(config, mode_config)
 
-        # dataset_name = dataset_name.lower()
-        # d = {
-        #     'celeba': CelebADataset,
-        #     'isic': ISICDataset,
-        #     'mnist': MNISTDataset,
-        #     'waterbirds': WaterbirdsDataset,
-        # }
         dataset_triplet = load_dataset(cfg=data_config)
         dataset_class = FdmDatasetWrapper
         batch_size = config['batch_size']
+
+        context_labels = None
+        # Check whether to use the ground-truth labels for the context-set or whether the labels
+        # need to be predicted
+        if data_config.predict_context:
+            # trained on the training set
+            # 1. step: train classifier on triplet.train
+            # 2. step: predict labels on triplet.context
+            # 3. step: combine datasets
+            train_data, test_data = dataset_triplet.train, dataset_triplet.context
+            y_dim = dataset_triplet.y_dim
+            input_shape = next(iter(train_data))[0].shape
+
+            train_loader = DataLoader(
+                train_data,
+                batch_size=data_config.batch_size,
+                pin_memory=True,
+                shuffle=True,
+                num_workers=data_config.num_workers,
+            )
+            test_loader = DataLoader(
+                test_data,
+                batch_size=data_config.test_batch_size,
+                shuffle=False,
+                pin_memory=True,
+                num_workers=data_config.num_workers,
+            )
+
+            clf: Classifier = fit_classifier(
+                data_config,
+                input_shape,
+                train_data=train_loader,
+                train_on_recon=False,
+                pred_s=False,
+                test_data=test_loader,
+                target_dim=y_dim,
+                device=device,
+            )
+
+            context_labels, actual, _ = clf.predict_dataset(test_loader, device=device)
+            wandb.log({"context.acc": (context_labels == actual).float().mean()})
 
         dataloaders = {}
         for split in DATA_SPLITS:
             key = 'train' if 'train' in split else split
             split_subclass_labels = subclass_labels[key]
             shared_dl_args = {'batch_size': batch_size, 'num_workers': config['workers']}
+
+            if split in ("train", "train_clean", "val"):
+                # The ground-truth labels are being used for the context-set
+                if context_labels is None:
+                    dataset = ConcatDataset([dataset_triplet.train, dataset_triplet.context])
+                # The predicted labels are being used for the context set
+                else:
+                    dataset = TrainContextWrapper(
+                        dataset_triplet.train,
+                        context=dataset_triplet.context,
+                        new_context_labels=context_labels,
+                    )
+            else:
+                dataset = dataset_triplet.test
             if split == 'train':
                 dataset = dataset_class(
                     cfg=data_config,
                     split=split,
-                    dataset_triplet=dataset_triplet,
+                    dataset=dataset,
                     device=device,
                 )
                 dataset.add_subclass_labels(split_subclass_labels, seed=seed)
@@ -404,7 +456,7 @@ class GEORGEHarness:
                 # Evaluation dataloaders (including for the training set) are "clean" - no data augmentation or shuffling
                 dataset = dataset_class(
                     cfg=data_config,
-                    dataset_triplet=dataset_triplet,
+                    dataset=dataset,
                     split=key,
                     device=device,
                 )

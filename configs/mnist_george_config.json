@@ -17,7 +17,7 @@
             "class_name": "Adam"
         },
         "criterion_config": {},
-        "workers": 8,
+        "workers": 0,
         "eval_only": false,
         "metric_types": [
             "loss",

@@ -131,6 +131,7 @@ class BaseConfig:
     batch_size: int = 256
     test_batch_size: int = 1000
     num_workers: int = 8
+    predict_context: bool = True
 
     @classmethod
     def from_hydra(cls: Type[T], hydra_config: DictConfig) -> T:
