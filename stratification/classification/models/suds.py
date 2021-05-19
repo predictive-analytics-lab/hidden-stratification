@@ -28,7 +28,7 @@ class Mp64x64Net(nn.Module):
         layers["conv5"] = self._conv_block(256, 512, 3, 1, 1)
         layers["mp5"] = nn.MaxPool2d(2, 2)
 
-        layers["flatten"] = nn.Flatten
+        layers["flatten"] = nn.Flatten()
         self.convnet = nn.Sequential(layers)
         self.activation_layer_name = "convnet.mp5"
         self.fc = nn.Linear(512, num_classes)
