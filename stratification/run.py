@@ -42,7 +42,7 @@ def main() -> None:
         dir=str(local_dir),
         config=config,
         reinit=True,
-        group=config.get("group", f"{config['dataset']}/GEORGE/{cluster_model_name}"),
+        group=config.get("group", f"{config['dataset']}.GEORGE.{cluster_model_name}"),
     )
 
     torch.multiprocessing.set_sharing_strategy('file_system')

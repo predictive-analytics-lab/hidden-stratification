@@ -60,7 +60,8 @@
         ],
         "search_k": false,
         "max_k": 2,
-        "overcluster": true,
-        "sil_cuda": true
+        "overcluster": false,
+        "sil_cuda": true,
+        "n_init": 2
     }
 }

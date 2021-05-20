@@ -389,11 +389,11 @@ class GEORGEClassification:
         del outputs
 
         superclass_labels = pd.DataFrame(outputs_cat["superclass"], columns=["superclass"])
-        subclass_labels = pd.DataFrame(outputs_cat["subclass"], columns=["subclass"])
+        subclass_labels = pd.DataFrame(outputs_cat["true_subclass"], columns=["subclass"])
         actual = em.DataTuple(x=subclass_labels, s=subclass_labels, y=superclass_labels)
         predictions = em.Prediction(pd.Series(outputs_cat["preds"]))
         outputs_cat["metrics"] = compute_metrics(
-            predictions=predictions, actual=actual, s_dim=dataset.get_num_classes("subclass")
+            predictions=predictions, actual=actual, s_dim=dataset.get_num_classes("true_subclass")
         )
 
         if activations_handle:
